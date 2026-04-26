@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>项目管理工具 - Vue 甘特图</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar" aria-label="项目导航">
+        <div class="brand">
+          <span class="brand-mark">PM</span>
+          <div>
+            <strong>项目管理</strong>
+            <span>Vue 交付版</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button
+            class="nav-item"
+            :class="{ active: currentView === 'gantt' }"
+            type="button"
+            @click="navigate('gantt')"
+          >
+            <span class="nav-icon">▦</span>
+            甘特图
+          </button>
+          <button
+            class="nav-item"
+            :class="{ active: currentView === 'projects' }"
+            type="button"
+            @click="navigate('projects')"
+          >
+            <span class="nav-icon">☰</span>
+            历史项目
+          </button>
+        </nav>
+      </aside>
+
+      <main class="workspace">
+        <section v-if="currentView === 'gantt'" class="page-view">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">开发周期 · {{ dateRangeLabel }}</p>
+            <form v-if="isEditingProjectName" class="project-title-form" @submit.prevent="saveProjectName">
+              <input
+                ref="projectNameInput"
+                v-model.trim="projectNameDraft"
+                maxlength="80"
+                required
+                @keydown.esc.prevent="cancelProjectNameEdit"
+              />
+              <button class="primary-button" type="submit">保存</button>
+              <button class="text-button" type="button" @click="cancelProjectNameEdit">取消</button>
+            </form>
+            <div v-else class="project-title">
+              <h1>{{ projectName }}</h1>
+              <button class="small-icon" type="button" title="编辑项目名称" @click="startProjectNameEdit">✎</button>
+            </div>
+          </div>
+          <div class="topbar-actions">
+            <button class="icon-button" type="button" title="刷新数据" @click="loadTasks">↻</button>
+            <button class="text-button" type="button" @click="openProjectForm">新建项目</button>
+            <button class="primary-button" type="button" @click="openCreateForm">新增任务</button>
+          </div>
+        </header>
+
+        <section class="summary-grid" aria-label="项目概览">
+          <article class="metric">
+            <span>总体进度</span>
+            <strong>{{ summary.overallProgress }}%</strong>
+          </article>
+          <article class="metric">
+            <span>当前任务</span>
+            <strong>{{ visibleTasks.length }}</strong>
+          </article>
+          <article class="metric">
+            <span>风险任务</span>
+            <strong>{{ summary.riskCount }}</strong>
+          </article>
+          <article class="metric">
+            <span>预计结束</span>
+            <strong>{{ summary.endDate }}</strong>
+          </article>
+        </section>
+
+        <section class="toolbar" aria-label="甘特图工具栏">
+          <label class="search-field">
+            <span>搜索</span>
+            <input v-model="filters.keyword" type="search" placeholder="任务、负责人或阶段" />
+          </label>
+          <label class="select-field">
+            <span>状态</span>
+            <select v-model="filters.status">
+              <option value="all">全部状态</option>
+              <option v-for="status in statuses" :key="status" :value="status">{{ status }}</option>
+            </select>
+          </label>
+          <label class="toggle-field">
+            <input v-model="filters.criticalOnly" type="checkbox" />
+            <span>仅关键路径</span>
+          </label>
+          <span class="save-state" :class="{ saving: isSaving }">{{ saveMessage }}</span>
+        </section>
+
+        <section class="gantt-panel" aria-label="甘特图">
+          <div v-if="isLoading" class="empty-state">加载项目数据中</div>
+          <div v-else-if="errorMessage" class="empty-state error">{{ errorMessage }}</div>
+          <div v-else class="gantt" :style="ganttStyle">
+            <div class="gantt-header sticky-left">任务</div>
+            <div class="gantt-header timeline-header">
+              <div v-for="day in timelineDays" :key="day.iso" class="day-cell">
+                {{ day.label }}
+                <small>{{ day.weekday }}</small>
+              </div>
+            </div>
+
+            <div class="task-list">
+              <article v-for="task in visibleTasks" :key="task.id" class="task-row">
+                <div class="task-name">
+                  <strong :title="task.name">{{ task.name }}</strong>
+                  <span>{{ task.phase }} · {{ task.owner }} · {{ formatDate(task.start) }}-{{ formatDate(task.end) }}</span>
+                </div>
+                <div class="task-actions">
+                  <span class="status" :class="statusClass(task.status)">{{ task.status }}</span>
+                  <button class="small-icon" type="button" title="编辑任务" @click="openEditForm(task)">✎</button>
+                </div>
+              </article>
+            </div>
+
+            <div class="timeline" :style="{ width: timelineWidth + 'px' }">
+              <div v-for="task in visibleTasks" :key="task.id" class="timeline-row">
+                <button
+                  class="bar"
+                  :class="statusClass(task.status)"
+                  :style="barStyle(task)"
+                  type="button"
+                  @click="openEditForm(task)"
+                >
+                  <span class="bar-fill" :style="{ width: task.progress + '%' }"></span>
+                  <span class="bar-label">{{ task.progress }}%</span>
+                </button>
+                <span
+                  v-if="task.milestone"
+                  class="milestone"
+                  title="里程碑"
+                  :style="milestoneStyle(task)"
+                ></span>
+              </div>
+              <div v-if="showTodayLine" class="today-line" :style="{ left: todayOffset * dayWidth + 'px' }"></div>
+            </div>
+
+            <div v-if="visibleTasks.length === 0" class="empty-state overlay">没有匹配的任务</div>
+          </div>
+        </section>
+
+        <section class="detail-band" aria-label="任务快速编辑">
+          <article v-for="task in visibleTasks" :key="task.id" class="task-card">
+            <div>
+              <strong>{{ task.name }}</strong>
+              <span>{{ task.owner }} · {{ task.phase }}</span>
+            </div>
+            <label>
+              <span>进度</span>
+              <input
+                :value="task.progress"
+                min="0"
+                max="100"
+                type="range"
+                @change="updateTask(task, { progress: Number($event.target.value) })"
+              />
+            </label>
+            <select :value="task.status" @change="updateTask(task, { status: $event.target.value })">
+              <option v-for="status in statuses" :key="status" :value="status">{{ status }}</option>
+            </select>
+          </article>
+        </section>
+        </section>
+
+        <section v-else class="page-view">
+          <header class="topbar">
+            <div>
+              <p class="eyebrow">项目档案 · {{ projects.length }} 个项目</p>
+              <h1>历史项目</h1>
+            </div>
+            <div class="topbar-actions">
+              <button class="icon-button" type="button" title="刷新项目" @click="loadProjectsSummaryOnly">↻</button>
+              <button class="primary-button" type="button" @click="openProjectForm">新建项目</button>
+            </div>
+          </header>
+
+          <section class="project-board" aria-label="历史项目列表">
+            <button
+              v-for="project in projects"
+              :key="project.id"
+              class="project-card"
+              :class="{ active: project.id === activeProjectId }"
+              type="button"
+              @click="selectProject(project.id)"
+            >
+              <span class="project-card-title">{{ project.name }}</span>
+              <span class="project-card-meta">
+                {{ project.taskCount }} 个任务 · {{ project.progress }}% 完成
+              </span>
+              <span class="project-card-stats">
+                <span>预计结束 {{ project.endDate ? formatDate(project.endDate) : '未排期' }}</span>
+                <span :class="{ danger: project.riskCount > 0 }">{{ project.riskCount }} 个风险</span>
+              </span>
+            </button>
+
+            <button class="project-card add-card" type="button" @click="openProjectForm">
+              <span class="project-card-title">新建项目</span>
+              <span class="project-card-meta">创建一个独立的甘特图计划</span>
+            </button>
+          </section>
+        </section>
+      </main>
+
+      <div v-if="formOpen" class="modal-backdrop" @click.self="closeForm">
+        <form class="modal" @submit.prevent="submitForm">
+          <header class="modal-header">
+            <h2>{{ editingTask ? '编辑任务' : '新增任务' }}</h2>
+            <button class="icon-button" type="button" title="关闭" @click="closeForm">×</button>
+          </header>
+
+          <div class="form-grid">
+            <label>
+              <span>任务名称</span>
+              <input v-model.trim="form.name" required />
+            </label>
+            <label>
+              <span>负责人</span>
+              <input v-model.trim="form.owner" required />
+            </label>
+            <label>
+              <span>阶段</span>
+              <input v-model.trim="form.phase" required />
+            </label>
+            <label>
+              <span>状态</span>
+              <select v-model="form.status">
+                <option v-for="status in statuses" :key="status" :value="status">{{ status }}</option>
+              </select>
+            </label>
+            <label>
+              <span>开始日期</span>
+              <input v-model="form.start" type="date" required />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input v-model="form.end" type="date" required />
+            </label>
+            <label>
+              <span>进度</span>
+              <input v-model.number="form.progress" min="0" max="100" type="number" required />
+            </label>
+            <div class="check-row">
+              <label>
+                <input v-model="form.critical" type="checkbox" />
+                <span>关键路径</span>
+              </label>
+              <label>
+                <input v-model="form.milestone" type="checkbox" />
+                <span>里程碑</span>
+              </label>
+            </div>
+          </div>
+
+          <p v-if="formError" class="form-error">{{ formError }}</p>
+
+          <footer class="modal-actions">
+            <button v-if="editingTask" class="danger-button" type="button" @click="deleteCurrentTask">删除</button>
+            <span></span>
+            <button class="text-button" type="button" @click="closeForm">取消</button>
+            <button class="primary-button" type="submit">{{ editingTask ? '保存修改' : '创建任务' }}</button>
+          </footer>
+        </form>
+      </div>
+
+      <div v-if="projectFormOpen" class="modal-backdrop" @click.self="closeProjectForm">
+        <form class="modal compact-modal" @submit.prevent="submitProjectForm">
+          <header class="modal-header">
+            <h2>新建项目</h2>
+            <button class="icon-button" type="button" title="关闭" @click="closeProjectForm">×</button>
+          </header>
+
+          <label>
+            <span>项目名称</span>
+            <input v-model.trim="projectForm.name" maxlength="80" required />
+          </label>
+
+          <p v-if="projectFormError" class="form-error">{{ projectFormError }}</p>
+
+          <footer class="modal-actions compact-actions">
+            <span></span>
+            <button class="text-button" type="button" @click="closeProjectForm">取消</button>
+            <button class="primary-button" type="submit">创建并进入</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+
+    <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>

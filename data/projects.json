@@ -1,0 +1,113 @@
+[
+  {
+    "name": "Billing Portal",
+    "id": "73af7b90-2388-47ce-b295-5fcc1ffe59a0",
+    "createdAt": "2026-04-25T10:41:41.521Z",
+    "updatedAt": "2026-04-25T10:41:41.521Z",
+    "tasks": []
+  },
+  {
+    "id": "project-001",
+    "name": "电商小程序开发计划",
+    "createdAt": "2026-04-24T00:00:00.000Z",
+    "updatedAt": "2026-04-24T00:00:00.000Z",
+    "tasks": [
+      {
+        "id": "task-001",
+        "name": "需求梳理与范围确认",
+        "owner": "Momo",
+        "phase": "启动",
+        "start": "2026-04-20",
+        "end": "2026-04-23",
+        "progress": 100,
+        "status": "已完成",
+        "critical": true,
+        "milestone": false
+      },
+      {
+        "id": "task-002",
+        "name": "信息架构与原型设计",
+        "owner": "Alex",
+        "phase": "设计",
+        "start": "2026-04-24",
+        "end": "2026-04-29",
+        "progress": 45,
+        "status": "进行中",
+        "critical": true,
+        "milestone": false
+      },
+      {
+        "id": "task-003",
+        "name": "UI 视觉规范",
+        "owner": "Nina",
+        "phase": "设计",
+        "start": "2026-04-27",
+        "end": "2026-05-01",
+        "progress": 20,
+        "status": "进行中",
+        "critical": false,
+        "milestone": false
+      },
+      {
+        "id": "task-004",
+        "name": "账号与权限模块",
+        "owner": "Kai",
+        "phase": "开发",
+        "start": "2026-04-30",
+        "end": "2026-05-07",
+        "progress": 0,
+        "status": "未开始",
+        "critical": true,
+        "milestone": false
+      },
+      {
+        "id": "task-005",
+        "name": "商品与订单接口",
+        "owner": "Kai",
+        "phase": "开发",
+        "start": "2026-05-04",
+        "end": "2026-05-12",
+        "progress": 0,
+        "status": "未开始",
+        "critical": true,
+        "milestone": false
+      },
+      {
+        "id": "task-006",
+        "name": "支付联调",
+        "owner": "Momo",
+        "phase": "集成",
+        "start": "2026-05-11",
+        "end": "2026-05-14",
+        "progress": 0,
+        "status": "风险",
+        "critical": true,
+        "milestone": false
+      },
+      {
+        "id": "task-007",
+        "name": "测试与缺陷修复",
+        "owner": "Nina",
+        "phase": "测试",
+        "start": "2026-05-13",
+        "end": "2026-05-19",
+        "progress": 0,
+        "status": "未开始",
+        "critical": false,
+        "milestone": false
+      },
+      {
+        "id": "task-008",
+        "name": "上线准备",
+        "owner": "Alex",
+        "phase": "发布",
+        "start": "2026-05-20",
+        "end": "2026-05-21",
+        "progress": 0,
+        "status": "未开始",
+        "critical": true,
+        "milestone": true
+      }
+    ]
+  }
+]
