@@ -1,8 +1,8 @@
 {
-  "name": "pm-tools-nosql-v1",
-  "version": "1.0.0",
+  "name": "pm-tools-sql-v2",
+  "version": "2.0.0",
   "private": true,
-  "description": "PM-Tools-NoSQL-V1 Vue gantt project management tool with SQLite persistence.",
+  "description": "PM-Tools-SQL-V2 Vue gantt project management tool with SQLite persistence and safe DB upgrades.",
   "scripts": {
     "start": "node --no-warnings server.js",
     "dev": "node --no-warnings server.js"

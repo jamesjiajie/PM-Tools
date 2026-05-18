@@ -6,13 +6,15 @@ const path = require('node:path');
 const { URL } = require('node:url');
 const { DatabaseSync } = require('node:sqlite');
 
-const VERSION = 'PM-Tools-NoSQL-V1';
+const VERSION = 'PM-Tools-SQL-V2';
+const SCHEMA_VERSION = 2;
 const PORT = Number(process.env.PORT || 5173);
 const HOST = process.env.HOST || '127.0.0.1';
 const rootDir = __dirname;
 const publicDir = path.join(rootDir, 'public');
 const dataDir = process.env.DATA_DIR || path.join(rootDir, 'data');
 const dbFile = path.join(dataDir, 'pm-tools.sqlite');
+const backupDir = path.join(dataDir, 'backups');
 const legacyProjectsFile = path.join(dataDir, 'projects.json');
 const contentTypes = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8' };
 let db;
@@ -22,11 +24,57 @@ function initDatabase() {
   db = new DatabaseSync(dbFile);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
+  ensureBaseSchema();
+  migrateDatabase();
+  const count = db.prepare('SELECT COUNT(*) AS count FROM projects').get().count;
+  if (count === 0) migrateLegacyJson();
+}
+
+function ensureBaseSchema() {
   db.exec(`CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, name TEXT NOT NULL, owner TEXT NOT NULL, phase TEXT NOT NULL, start TEXT NOT NULL, end TEXT NOT NULL, progress INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, critical INTEGER NOT NULL DEFAULT 0, milestone INTEGER NOT NULL DEFAULT 0, FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE CASCADE);
 CREATE INDEX IF NOT EXISTS idx_tasks_project_id ON tasks(project_id);`);
-  const count = db.prepare('SELECT COUNT(*) AS count FROM projects').get().count;
-  if (count === 0) migrateLegacyJson();
+}
+
+function migrateDatabase() {
+  const currentVersion = getSchemaVersion();
+  if (currentVersion >= SCHEMA_VERSION) return;
+  const backupFile = backupDatabase(`before-v${SCHEMA_VERSION}`);
+  db.exec('BEGIN');
+  try {
+    db.exec('CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL)');
+    setMeta('schema_version', String(SCHEMA_VERSION));
+    setMeta('last_backup_file', backupFile);
+    db.exec('COMMIT');
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function getSchemaVersion() {
+  const table = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'app_meta'").get();
+  if (!table) return 1;
+  const row = db.prepare("SELECT value FROM app_meta WHERE key = 'schema_version'").get();
+  return Number(row?.value || 1);
+}
+
+function setMeta(key, value) {
+  db.prepare(`INSERT INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, new Date().toISOString());
+}
+
+function backupDatabase(label) {
+  fs.mkdirSync(backupDir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
+  const safeLabel = String(label).replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+  const backupFile = path.join(backupDir, `pm-tools-${stamp}-${safeLabel}.sqlite`);
+  db.exec(`VACUUM INTO ${sqlString(backupFile)}`);
+  return backupFile;
+}
+
+function sqlString(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
 }
 
 function migrateLegacyJson() {
@@ -115,7 +163,7 @@ async function handleApi(req, res, url) {
   const projectIdMatch = url.pathname.match(/^\/api\/projects\/([^/]+)$/);
   const projectTasksMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tasks$/);
   const projectTaskIdMatch = url.pathname.match(/^\/api\/projects\/([^/]+)\/tasks\/([^/]+)$/);
-  if (url.pathname === '/api/version') return sendJson(res, 200, { version: VERSION, storage: 'sqlite', dbFile, dataDir });
+  if (url.pathname === '/api/version') return sendJson(res, 200, { version: VERSION, storage: 'sqlite', schemaVersion: getSchemaVersion(), dbFile, backupDir, dataDir });
   if (url.pathname === '/api/projects' && req.method === 'GET') return sendJson(res, 200, readProjects().map(summarizeProject));
   if (url.pathname === '/api/projects' && req.method === 'POST') { const input = await readBody(req); const now = new Date().toISOString(); const project = { ...normalizeProject(input), id: randomUUID(), createdAt: now, updatedAt: now, tasks: [] }; insertProject(project); return sendJson(res, 201, project); }
   if (projectIdMatch && req.method === 'GET') { const project = readProject(decodeURIComponent(projectIdMatch[1])); return project ? sendJson(res, 200, project) : sendError(res, 404, '项目不存在'); }
