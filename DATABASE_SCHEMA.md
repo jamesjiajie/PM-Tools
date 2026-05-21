@@ -13,6 +13,7 @@ The database is initialized in `server.js` with Node's built-in `node:sqlite` mo
 ```mermaid
 erDiagram
   projects ||--o{ tasks : contains
+  tasks ||--o{ tasks : contains
 
   projects {
     TEXT id PK
@@ -24,6 +25,7 @@ erDiagram
   tasks {
     TEXT id PK
     TEXT project_id FK
+    TEXT parent_id FK
     TEXT name
     TEXT owner
     TEXT phase
@@ -57,6 +59,7 @@ erDiagram
 | --- | --- | --- | --- | --- |
 | `id` | `TEXT` | Yes | None | Primary key. Generated with `randomUUID()` when a task is created. |
 | `project_id` | `TEXT` | Yes | None | Foreign key pointing to `projects.id`. |
+| `parent_id` | `TEXT` | No | `NULL` | Optional self-reference pointing to the parent `tasks.id` for subtasks. |
 | `name` | `TEXT` | Yes | None | Task name. |
 | `owner` | `TEXT` | Yes | None | Person responsible for the task. |
 | `phase` | `TEXT` | Yes | None | Project phase for the task. |
@@ -75,11 +78,11 @@ erDiagram
 | `value` | `TEXT` | Yes | None | Metadata value. |
 | `updated_at` | `TEXT` | Yes | None | Last metadata update timestamp, stored as an ISO string. |
 
-Current V2 metadata keys:
+Current V3 metadata keys:
 
 | Key | Description |
 | --- | --- |
-| `schema_version` | Current database schema version. V2 stores this as `2`. |
+| `schema_version` | Current database schema version. V3 stores this as `3`. |
 | `last_backup_file` | Most recent automatic pre-upgrade backup path. |
 
 ## Constraints And Indexes
@@ -90,14 +93,18 @@ Current V2 metadata keys:
 | Primary key | `tasks.id` | Each task has one unique ID. |
 | Primary key | `app_meta.key` | Each metadata key is unique. |
 | Foreign key | `tasks.project_id -> projects.id` | Each task belongs to one project. |
+| Foreign key | `tasks.parent_id -> tasks.id` | Subtasks can be associated with a parent task. |
 | Cascade delete | `ON DELETE CASCADE` | Deleting a project deletes its tasks. |
 | Index | `idx_tasks_project_id` | Speeds up task lookup by project ID. |
+| Index | `idx_tasks_parent_id` | Speeds up subtask lookup by parent task ID. |
 
 ## Initialization Behavior
 
 On startup, `server.js` runs `CREATE TABLE IF NOT EXISTS` for the core tables. This means normal startup will create missing tables but will not delete existing tables or rows.
 
-V2 records the schema version in `app_meta`. If the current database schema is older than the app schema version, the app first creates a consistent SQLite backup with `VACUUM INTO`, then applies the migration.
+V3 records the schema version in `app_meta`. If the current database schema is older than the app schema version, the app first creates a consistent SQLite backup with `VACUUM INTO`, then applies the migration.
+
+The V3 migration adds `tasks.parent_id` and `idx_tasks_parent_id` so each task can own one level of subtasks. The API validates that subtasks point to an existing top-level task in the same project.
 
 Automatic pre-upgrade backups are stored in:
 

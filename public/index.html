@@ -74,7 +74,7 @@
           </article>
           <article class="metric">
             <span>当前任务</span>
-            <strong>{{ visibleTasks.length }}</strong>
+            <strong>{{ visibleTaskRows.length }}</strong>
           </article>
           <article class="metric">
             <span>风险任务</span>
@@ -118,29 +118,57 @@
             </div>
 
             <div class="task-list">
-              <article v-for="task in visibleTasks" :key="task.id" class="task-row">
-                <div class="task-name">
+              <article v-for="task in visibleTaskRows" :key="task.id" class="task-row" :class="{ 'subtask-row': task.level === 1 }">
+                <div class="task-name" :style="{ paddingLeft: task.level ? '28px' : '0' }">
+                  <span v-if="task.level === 1" class="subtask-connector" aria-hidden="true"></span>
                   <strong :title="task.name">{{ task.name }}</strong>
-                  <span>{{ task.phase }} · {{ task.owner }} · {{ formatDate(task.start) }}-{{ formatDate(task.end) }}</span>
+                  <span>
+                    <template v-if="task.childCount">{{ task.childCount }} 个子任务 · </template>
+                    {{ task.phase }} · {{ task.owner }} · {{ formatDate(task.start) }}-{{ formatDate(task.end) }}
+                  </span>
                 </div>
                 <div class="task-actions">
                   <span class="status" :class="statusClass(task.status)">{{ task.status }}</span>
+                  <button
+                    v-if="task.level === 0"
+                    class="small-icon"
+                    type="button"
+                    title="新增子任务"
+                    @click="openCreateSubtaskForm(task)"
+                  >
+                    +
+                  </button>
                   <button class="small-icon" type="button" title="编辑任务" @click="openEditForm(task)">✎</button>
                 </div>
               </article>
             </div>
 
             <div class="timeline" :style="{ width: timelineWidth + 'px' }">
-              <div v-for="task in visibleTasks" :key="task.id" class="timeline-row">
+              <div v-for="task in visibleTaskRows" :key="task.id" class="timeline-row" :class="{ 'subtask-row': task.level === 1 }">
                 <button
                   class="bar"
-                  :class="statusClass(task.status)"
+                  :class="[
+                    statusClass(task.status),
+                    { 'subtask-bar': task.level === 1, 'move-dragging': taskMoveDrag?.active && taskMoveDrag.taskId === task.id },
+                  ]"
                   :style="barStyle(task)"
                   type="button"
-                  @click="openEditForm(task)"
+                  @click="openTaskFromBar(task)"
+                  @pointerdown="startTaskMovePress(task, $event)"
                 >
                   <span class="bar-fill" :style="{ width: task.progress + '%' }"></span>
                   <span class="bar-label">{{ task.progress }}%</span>
+                  <span
+                    class="bar-handle"
+                    :style="{ left: task.progress + '%' }"
+                    title="拖动调整进度"
+                    @pointerdown.stop.prevent="startProgressDrag(task, $event)"
+                  ></span>
+                  <span
+                    class="bar-end-handle"
+                    title="拖动调整结束日期"
+                    @pointerdown.stop.prevent="startEndDateDrag(task, $event)"
+                  ></span>
                 </button>
                 <span
                   v-if="task.milestone"
@@ -152,15 +180,15 @@
               <div v-if="showTodayLine" class="today-line" :style="{ left: todayOffset * dayWidth + 'px' }"></div>
             </div>
 
-            <div v-if="visibleTasks.length === 0" class="empty-state overlay">没有匹配的任务</div>
+            <div v-if="visibleTaskRows.length === 0" class="empty-state overlay">没有匹配的任务</div>
           </div>
         </section>
 
         <section class="detail-band" aria-label="任务快速编辑">
-          <article v-for="task in visibleTasks" :key="task.id" class="task-card">
+          <article v-for="task in visibleTaskRows" :key="task.id" class="task-card" :class="{ 'subtask-card': task.level === 1 }">
             <div>
               <strong>{{ task.name }}</strong>
-              <span>{{ task.owner }} · {{ task.phase }}</span>
+              <span>{{ task.level === 1 ? '子任务 · ' : '' }}{{ task.owner }} · {{ task.phase }}</span>
             </div>
             <label>
               <span>进度</span>
@@ -192,23 +220,24 @@
           </header>
 
           <section class="project-board" aria-label="历史项目列表">
-            <button
+            <article
               v-for="project in projects"
               :key="project.id"
               class="project-card"
               :class="{ active: project.id === activeProjectId }"
-              type="button"
-              @click="selectProject(project.id)"
             >
-              <span class="project-card-title">{{ project.name }}</span>
-              <span class="project-card-meta">
-                {{ project.taskCount }} 个任务 · {{ project.progress }}% 完成
-              </span>
-              <span class="project-card-stats">
-                <span>预计结束 {{ project.endDate ? formatDate(project.endDate) : '未排期' }}</span>
-                <span :class="{ danger: project.riskCount > 0 }">{{ project.riskCount }} 个风险</span>
-              </span>
-            </button>
+              <button class="project-card-main" type="button" @click="selectProject(project.id)">
+                <span class="project-card-title">{{ project.name }}</span>
+                <span class="project-card-meta">
+                  {{ project.taskCount }} 个任务 · {{ project.progress }}% 完成
+                </span>
+                <span class="project-card-stats">
+                  <span>预计结束 {{ project.endDate ? formatDate(project.endDate) : '未排期' }}</span>
+                  <span :class="{ danger: project.riskCount > 0 }">{{ project.riskCount }} 个风险</span>
+                </span>
+              </button>
+              <button class="project-delete" type="button" title="删除项目" @click="deleteProject(project)">×</button>
+            </article>
 
             <button class="project-card add-card" type="button" @click="openProjectForm">
               <span class="project-card-title">新建项目</span>
@@ -237,6 +266,13 @@
             <label>
               <span>阶段</span>
               <input v-model.trim="form.phase" required />
+            </label>
+            <label>
+              <span>所属任务</span>
+              <select v-model="form.parentId">
+                <option value="">主任务</option>
+                <option v-for="task in parentTaskOptions" :key="task.id" :value="task.id">{{ task.name }}</option>
+              </select>
             </label>
             <label>
               <span>状态</span>

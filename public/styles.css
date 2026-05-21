@@ -206,15 +206,15 @@ button {
 }
 
 .project-card {
+  position: relative;
   display: grid;
   gap: 12px;
   min-height: 150px;
-  padding: 18px;
+  padding: 0;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
   color: var(--ink);
-  text-align: left;
   box-shadow: var(--shadow);
 }
 
@@ -223,8 +223,45 @@ button {
   background: var(--accent-soft);
 }
 
+.project-card-main {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  min-height: 148px;
+  padding: 18px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.project-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 1px solid #ffd2cd;
+  border-radius: 8px;
+  background: #fff4f2;
+  color: var(--red);
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.16s ease;
+}
+
+.project-card:hover .project-delete,
+.project-card:focus-within .project-delete {
+  opacity: 1;
+}
+
 .project-card-title {
   overflow: hidden;
+  padding-right: 34px;
   font-size: 18px;
   font-weight: 900;
   text-overflow: ellipsis;
@@ -251,8 +288,10 @@ button {
 }
 
 .add-card {
+  padding: 18px;
   border-style: dashed;
   color: var(--accent);
+  text-align: left;
   box-shadow: none;
 }
 
@@ -549,8 +588,24 @@ select {
   border-bottom: 1px solid var(--line);
 }
 
+.task-row.subtask-row {
+  background: #fbfcfd;
+}
+
 .task-name {
+  position: relative;
   min-width: 0;
+}
+
+.subtask-connector {
+  position: absolute;
+  top: 5px;
+  left: 8px;
+  width: 12px;
+  height: 18px;
+  border-bottom: 2px solid #b7c4d2;
+  border-left: 2px solid #b7c4d2;
+  border-bottom-left-radius: 6px;
 }
 
 .task-name strong {
@@ -612,17 +667,38 @@ select {
   background-size: var(--day-width) 100%;
 }
 
+.timeline-row.subtask-row {
+  background-color: #fbfcfd;
+}
+
 .bar {
   position: absolute;
   top: 14px;
   height: 30px;
-  overflow: hidden;
+  overflow: visible;
   padding: 0;
   border: 0;
   border-radius: 8px;
   background: #d8e7ff;
   color: #ffffff;
   box-shadow: inset 0 0 0 1px rgba(24, 32, 44, 0.08);
+  touch-action: none;
+}
+
+.bar:active {
+  cursor: grabbing;
+}
+
+.bar.move-dragging {
+  box-shadow:
+    0 8px 18px rgba(24, 32, 44, 0.16),
+    inset 0 0 0 1px rgba(24, 32, 44, 0.08);
+}
+
+.bar.subtask-bar {
+  top: 17px;
+  height: 24px;
+  border-radius: 999px;
 }
 
 .bar-fill {
@@ -631,6 +707,7 @@ select {
   min-width: 7px;
   border-radius: inherit;
   background: var(--blue);
+  overflow: hidden;
 }
 
 .bar.done {
@@ -660,6 +737,64 @@ select {
   font-weight: 800;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.2);
   white-space: nowrap;
+}
+
+.bar-handle {
+  position: absolute;
+  top: 50%;
+  z-index: 2;
+  width: 18px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  background: #18202c;
+  box-shadow: 0 2px 8px rgba(24, 32, 44, 0.24);
+  cursor: ew-resize;
+}
+
+.bar-handle:hover,
+.bar-handle:focus-visible {
+  background: var(--accent);
+}
+
+.bar-end-handle {
+  position: absolute;
+  top: 50%;
+  right: -24px;
+  z-index: 3;
+  width: 18px;
+  height: 28px;
+  transform: translateY(-50%);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #2f6fbd;
+  box-shadow: 0 2px 8px rgba(24, 32, 44, 0.24);
+  cursor: ew-resize;
+}
+
+.bar-end-handle::before,
+.bar-end-handle::after {
+  content: "";
+  position: absolute;
+  top: 7px;
+  width: 2px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.bar-end-handle::before {
+  left: 5px;
+}
+
+.bar-end-handle::after {
+  right: 5px;
+}
+
+.bar-end-handle:hover,
+.bar-end-handle:focus-visible {
+  background: var(--accent);
 }
 
 .milestone {
@@ -728,6 +863,10 @@ select {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
+}
+
+.task-card.subtask-card {
+  border-left: 4px solid #9fc4ef;
 }
 
 .task-card strong,

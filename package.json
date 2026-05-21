@@ -1,11 +1,11 @@
 {
-  "name": "pm-tools-sql-v2",
-  "version": "2.0.0",
+  "name": "pm-tools-sql-v3",
+  "version": "3.0.0",
   "private": true,
-  "description": "PM-Tools-SQL-V2 Vue gantt project management tool with SQLite persistence and safe DB upgrades.",
+  "description": "PM-Tools-SQL-V3 Vue gantt project management tool with SQLite persistence, subtasks, and safe DB upgrades.",
   "scripts": {
     "start": "node --no-warnings server.js",
-    "dev": "node --no-warnings server.js"
+    "dev": "LIVE_RELOAD=1 node --watch --watch-path=server.js --no-warnings server.js"
   },
   "engines": {
     "node": ">=18"

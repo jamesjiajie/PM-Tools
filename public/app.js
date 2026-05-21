@@ -12,7 +12,26 @@ const EMPTY_FORM = {
   status: "未开始",
   critical: false,
   milestone: false,
+  parentId: "",
 };
+
+function todayIso() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function createTaskForm(overrides = {}) {
+  const today = todayIso();
+  return {
+    ...EMPTY_FORM,
+    start: today,
+    end: today,
+    ...overrides,
+  };
+}
 
 createApp({
   data() {
@@ -31,15 +50,19 @@ createApp({
       },
       statuses: STATUSES,
       dayWidth: 52,
-      today: new Date("2026-04-24T00:00:00"),
+      today: new Date(`${todayIso()}T00:00:00`),
       isLoading: true,
       isSaving: false,
       saveMessage: "所有更改已保存",
       errorMessage: "",
       formOpen: false,
       editingTask: null,
-      form: { ...EMPTY_FORM },
+      form: createTaskForm(),
       formError: "",
+      progressDrag: null,
+      endDateDrag: null,
+      taskMoveDrag: null,
+      suppressBarClick: false,
       projectFormOpen: false,
       projectForm: {
         name: "",
@@ -53,10 +76,33 @@ createApp({
       return [...this.tasks].sort((a, b) => new Date(a.start) - new Date(b.start));
     },
 
+    taskRows() {
+      const childrenByParent = new Map();
+      const roots = [];
+
+      this.sortedTasks.forEach((task) => {
+        if (task.parentId) {
+          const children = childrenByParent.get(task.parentId) || [];
+          children.push(task);
+          childrenByParent.set(task.parentId, children);
+        } else {
+          roots.push(task);
+        }
+      });
+
+      return roots.flatMap((task) => {
+        const children = childrenByParent.get(task.id) || [];
+        return [
+          { ...task, level: 0, childCount: children.length },
+          ...children.map((child) => ({ ...child, level: 1, childCount: 0 })),
+        ];
+      });
+    },
+
     visibleTasks() {
       const keyword = this.filters.keyword.trim().toLowerCase();
 
-      return this.sortedTasks.filter((task) => {
+      return this.taskRows.filter((task) => {
         const matchesKeyword = [task.name, task.owner, task.phase]
           .join(" ")
           .toLowerCase()
@@ -67,7 +113,27 @@ createApp({
       });
     },
 
+    visibleTaskRows() {
+      const keyword = this.filters.keyword.trim().toLowerCase();
+      const visibleIds = new Set(this.visibleTasks.map((task) => task.id));
+
+      this.tasks.forEach((task) => {
+        if (visibleIds.has(task.id) && task.parentId) visibleIds.add(task.parentId);
+        if (keyword && visibleIds.has(task.id)) {
+          this.tasks.filter((child) => child.parentId === task.id).forEach((child) => visibleIds.add(child.id));
+        }
+      });
+
+      return this.taskRows.filter((task) => visibleIds.has(task.id));
+    },
+
+    parentTaskOptions() {
+      const editingId = this.editingTask?.id || "";
+      return this.sortedTasks.filter((task) => !task.parentId && task.id !== editingId);
+    },
+
     ganttStart() {
+      if (this.taskMoveDrag?.anchorStart) return new Date(`${this.taskMoveDrag.anchorStart}T00:00:00`);
       if (!this.tasks.length) return new Date("2026-04-24T00:00:00");
       return new Date(`${this.minByDate(this.tasks, "start").start}T00:00:00`);
     },
@@ -107,7 +173,7 @@ createApp({
     },
 
     showTodayLine() {
-      return this.todayOffset >= 0 && this.todayOffset < this.timelineDays.length && this.visibleTasks.length > 0;
+      return this.todayOffset >= 0 && this.todayOffset < this.timelineDays.length && this.visibleTaskRows.length > 0;
     },
 
     dateRangeLabel() {
@@ -147,6 +213,9 @@ createApp({
   beforeUnmount() {
     window.removeEventListener("hashchange", this.syncRoute);
     window.removeEventListener("resize", this.syncDayWidth);
+    this.stopProgressListeners();
+    this.stopEndDateListeners();
+    this.stopTaskMoveListeners();
   },
 
   methods: {
@@ -204,7 +273,7 @@ createApp({
       try {
         const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/tasks`);
         if (!response.ok) throw new Error("项目数据加载失败");
-        this.tasks = await response.json();
+        this.tasks = (await response.json()).map((task) => ({ parentId: "", ...task }));
         this.saveMessage = "所有更改已保存";
       } catch (error) {
         this.errorMessage = error.message;
@@ -300,6 +369,32 @@ createApp({
       }
     },
 
+    async deleteProject(project) {
+      const confirmed = window.confirm(`删除项目「${project.name}」？项目下的任务也会一起删除。`);
+      if (!confirmed) return;
+
+      try {
+        await this.request(`/api/projects/${encodeURIComponent(project.id)}`, {
+          method: "DELETE",
+        });
+        await this.loadProjectsSummaryOnly();
+
+        if (this.activeProjectId !== project.id) return;
+
+        const nextProject = this.projects[0];
+        if (nextProject) {
+          await this.selectProject(nextProject.id, false);
+        } else {
+          this.activeProjectId = "";
+          this.projectName = "电商小程序开发计划";
+          this.tasks = [];
+          this.openProjectForm();
+        }
+      } catch (error) {
+        this.errorMessage = error.message;
+      }
+    },
+
     async request(url, options) {
       this.isSaving = true;
       this.saveMessage = "保存中";
@@ -332,7 +427,7 @@ createApp({
           body: JSON.stringify(nextTask),
           },
         );
-        this.tasks = this.tasks.map((item) => (item.id === task.id ? savedTask : item));
+        this.tasks = this.tasks.map((item) => (item.id === task.id ? { parentId: "", ...savedTask } : item));
         await this.loadProjectsSummaryOnly();
       } catch (error) {
         this.errorMessage = error.message;
@@ -341,9 +436,29 @@ createApp({
 
     openCreateForm() {
       this.editingTask = null;
-      this.form = { ...EMPTY_FORM };
+      this.form = createTaskForm();
       this.formError = "";
       this.formOpen = true;
+    },
+
+    openCreateSubtaskForm(task) {
+      this.editingTask = null;
+      this.form = createTaskForm({
+        parentId: task.id,
+        owner: task.owner,
+        phase: task.phase,
+      });
+      this.formError = "";
+      this.formOpen = true;
+    },
+
+    openTaskFromBar(task) {
+      if (this.suppressBarClick) {
+        this.suppressBarClick = false;
+        return;
+      }
+
+      this.openEditForm(task);
     },
 
     openEditForm(task) {
@@ -375,13 +490,13 @@ createApp({
               body: JSON.stringify(this.form),
             },
           );
-          this.tasks = this.tasks.map((task) => (task.id === savedTask.id ? savedTask : task));
+          this.tasks = this.tasks.map((task) => (task.id === savedTask.id ? { parentId: "", ...savedTask } : task));
         } else {
           const savedTask = await this.request(`/api/projects/${encodeURIComponent(this.activeProjectId)}/tasks`, {
             method: "POST",
             body: JSON.stringify(this.form),
           });
-          this.tasks.push(savedTask);
+          this.tasks.push({ parentId: "", ...savedTask });
         }
 
         await this.loadProjectsSummaryOnly();
@@ -401,12 +516,202 @@ createApp({
             method: "DELETE",
           },
         );
-        this.tasks = this.tasks.filter((task) => task.id !== this.editingTask.id);
+        this.tasks = this.tasks.filter((task) => task.id !== this.editingTask.id && task.parentId !== this.editingTask.id);
         await this.loadProjectsSummaryOnly();
         this.closeForm();
       } catch (error) {
         this.formError = error.message;
       }
+    },
+
+    startProgressDrag(task, event) {
+      const bar = event.currentTarget.closest(".bar");
+      if (!bar) return;
+
+      this.progressDrag = {
+        taskId: task.id,
+        rect: bar.getBoundingClientRect(),
+        startX: event.clientX,
+        moved: false,
+      };
+
+      window.addEventListener("pointermove", this.handleProgressDrag);
+      window.addEventListener("pointerup", this.finishProgressDrag, { once: true });
+    },
+
+    handleProgressDrag(event) {
+      if (!this.progressDrag) return;
+
+      const { rect, startX, taskId } = this.progressDrag;
+      const task = this.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+
+      const nextProgress = Math.max(0, Math.min(100, Math.round(((event.clientX - rect.left) / rect.width) * 100)));
+
+      if (Math.abs(event.clientX - startX) > 2) {
+        this.progressDrag.moved = true;
+      }
+
+      this.tasks = this.tasks.map((item) =>
+        item.id === taskId ? { ...item, progress: nextProgress } : item,
+      );
+    },
+
+    async finishProgressDrag() {
+      if (!this.progressDrag) return;
+
+      const { taskId, moved } = this.progressDrag;
+      this.stopProgressListeners();
+
+      if (!moved) return;
+
+      this.suppressBarClick = true;
+      const task = this.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+
+      await this.updateTask(task, { progress: task.progress });
+    },
+
+    stopProgressListeners() {
+      window.removeEventListener("pointermove", this.handleProgressDrag);
+      window.removeEventListener("pointerup", this.finishProgressDrag);
+      this.progressDrag = null;
+    },
+
+    startEndDateDrag(task, event) {
+      const timeline = event.currentTarget.closest(".timeline");
+      if (!timeline) return;
+
+      const startDate = new Date(`${task.start}T00:00:00`);
+
+      this.endDateDrag = {
+        taskId: task.id,
+        timelineRect: timeline.getBoundingClientRect(),
+        startOffset: this.daysBetween(this.ganttStart, startDate),
+        startX: event.clientX,
+        moved: false,
+      };
+
+      window.addEventListener("pointermove", this.handleEndDateDrag);
+      window.addEventListener("pointerup", this.finishEndDateDrag, { once: true });
+    },
+
+    handleEndDateDrag(event) {
+      if (!this.endDateDrag) return;
+
+      const { timelineRect, startOffset, startX, taskId } = this.endDateDrag;
+      const targetOffset = Math.max(startOffset, Math.floor((event.clientX - timelineRect.left) / this.dayWidth));
+      const nextEndDate = new Date(this.ganttStart);
+      nextEndDate.setDate(this.ganttStart.getDate() + targetOffset);
+      const nextEnd = this.toIso(nextEndDate);
+
+      if (Math.abs(event.clientX - startX) > 2) {
+        this.endDateDrag.moved = true;
+      }
+
+      this.tasks = this.tasks.map((task) => (task.id === taskId ? { ...task, end: nextEnd } : task));
+    },
+
+    async finishEndDateDrag() {
+      if (!this.endDateDrag) return;
+
+      const { taskId, moved } = this.endDateDrag;
+      this.stopEndDateListeners();
+
+      if (!moved) return;
+
+      this.suppressBarClick = true;
+      const task = this.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+
+      await this.updateTask(task, { end: task.end });
+    },
+
+    stopEndDateListeners() {
+      window.removeEventListener("pointermove", this.handleEndDateDrag);
+      window.removeEventListener("pointerup", this.finishEndDateDrag);
+      this.endDateDrag = null;
+    },
+
+    startTaskMovePress(task, event) {
+      if (event.target.closest(".bar-handle, .bar-end-handle")) return;
+
+      const startDate = new Date(`${task.start}T00:00:00`);
+      const endDate = new Date(`${task.end}T00:00:00`);
+      const anchorStart = this.toIso(this.ganttStart);
+
+      this.taskMoveDrag = {
+        taskId: task.id,
+        anchorStart,
+        startOffset: this.daysBetween(new Date(`${anchorStart}T00:00:00`), startDate),
+        duration: this.daysBetween(startDate, endDate),
+        startX: event.clientX,
+        startY: event.clientY,
+        active: false,
+        moved: false,
+        timer: window.setTimeout(() => {
+          if (!this.taskMoveDrag || this.taskMoveDrag.taskId !== task.id) return;
+          this.taskMoveDrag.active = true;
+          this.suppressBarClick = true;
+        }, 260),
+      };
+
+      window.addEventListener("pointermove", this.handleTaskMoveDrag);
+      window.addEventListener("pointerup", this.finishTaskMoveDrag, { once: true });
+      window.addEventListener("pointercancel", this.cancelTaskMoveDrag, { once: true });
+    },
+
+    handleTaskMoveDrag(event) {
+      if (!this.taskMoveDrag) return;
+
+      const { active, anchorStart, duration, startOffset, startX, startY, taskId } = this.taskMoveDrag;
+      const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
+
+      if (!active) {
+        if (distance > 6) this.cancelTaskMoveDrag();
+        return;
+      }
+
+      const deltaDays = Math.round((event.clientX - startX) / this.dayWidth);
+      const nextStartOffset = Math.max(0, startOffset + deltaDays);
+      const anchorDate = new Date(`${anchorStart}T00:00:00`);
+      const nextStart = new Date(anchorDate);
+      const nextEnd = new Date(anchorDate);
+      nextStart.setDate(anchorDate.getDate() + nextStartOffset);
+      nextEnd.setDate(anchorDate.getDate() + nextStartOffset + duration);
+
+      if (Math.abs(deltaDays) > 0) this.taskMoveDrag.moved = true;
+
+      this.tasks = this.tasks.map((task) =>
+        task.id === taskId ? { ...task, start: this.toIso(nextStart), end: this.toIso(nextEnd) } : task,
+      );
+    },
+
+    async finishTaskMoveDrag() {
+      if (!this.taskMoveDrag) return;
+
+      const { active, moved, taskId } = this.taskMoveDrag;
+      this.stopTaskMoveListeners();
+
+      if (!active || !moved) return;
+
+      this.suppressBarClick = true;
+      const task = this.tasks.find((item) => item.id === taskId);
+      if (!task) return;
+
+      await this.updateTask(task, { start: task.start, end: task.end });
+    },
+
+    cancelTaskMoveDrag() {
+      this.stopTaskMoveListeners();
+    },
+
+    stopTaskMoveListeners() {
+      if (this.taskMoveDrag?.timer) window.clearTimeout(this.taskMoveDrag.timer);
+      window.removeEventListener("pointermove", this.handleTaskMoveDrag);
+      window.removeEventListener("pointerup", this.finishTaskMoveDrag);
+      window.removeEventListener("pointercancel", this.cancelTaskMoveDrag);
+      this.taskMoveDrag = null;
     },
 
     barStyle(task) {
