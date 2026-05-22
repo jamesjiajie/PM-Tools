@@ -2,6 +2,7 @@ const { createApp } = Vue;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const STATUSES = ["未开始", "进行中", "已完成", "风险"];
+const ACTIVE_PROJECT_STORAGE_KEY = "pm-tools.activeProjectId";
 const CHINA_PUBLIC_HOLIDAY_RANGES = [
   ["2026-01-01", "2026-01-03"],
   ["2026-02-15", "2026-02-23"],
@@ -61,6 +62,24 @@ function createTaskForm(overrides = {}) {
     end: today,
     ...overrides,
   };
+}
+
+function readStoredActiveProjectId() {
+  try {
+    return window.localStorage.getItem(ACTIVE_PROJECT_STORAGE_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStoredActiveProjectId(projectId) {
+  try {
+    if (projectId) {
+      window.localStorage.setItem(ACTIVE_PROJECT_STORAGE_KEY, projectId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_PROJECT_STORAGE_KEY);
+    }
+  } catch {}
 }
 
 createApp({
@@ -273,10 +292,10 @@ createApp({
           return;
         }
 
-        const nextProjectId =
-          this.activeProjectId && this.projects.some((project) => project.id === this.activeProjectId)
-            ? this.activeProjectId
-            : this.projects[0].id;
+        const storedProjectId = readStoredActiveProjectId();
+        const nextProjectId = [this.activeProjectId, storedProjectId, this.projects[0].id].find(
+          (projectId) => projectId && this.projects.some((project) => project.id === projectId),
+        );
         await this.selectProject(nextProjectId, false);
       } catch (error) {
         this.errorMessage = error.message;
@@ -315,6 +334,7 @@ createApp({
 
     async selectProject(projectId, showGantt = true) {
       this.activeProjectId = projectId;
+      writeStoredActiveProjectId(projectId);
       this.filters.keyword = "";
       this.filters.status = "all";
       this.filters.criticalOnly = false;
@@ -417,6 +437,7 @@ createApp({
           await this.selectProject(nextProject.id, false);
         } else {
           this.activeProjectId = "";
+          writeStoredActiveProjectId("");
           this.projectName = "电商小程序开发计划";
           this.tasks = [];
           this.openProjectForm();

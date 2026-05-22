@@ -31,6 +31,7 @@ function initDatabase() {
   migrateDatabase();
   const count = db.prepare('SELECT COUNT(*) AS count FROM projects').get().count;
   if (count === 0) migrateLegacyJson();
+  checkpointDatabase('FULL');
 }
 
 function ensureBaseSchema() {
@@ -78,8 +79,17 @@ function setMeta(key, value) {
     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`).run(key, value, new Date().toISOString());
 }
 
+function checkpointDatabase(mode = 'FULL') {
+  try {
+    db.exec(`PRAGMA wal_checkpoint(${mode})`);
+  } catch (error) {
+    console.warn(`SQLite WAL checkpoint skipped: ${error.message}`);
+  }
+}
+
 function backupDatabase(label) {
   fs.mkdirSync(backupDir, { recursive: true });
+  checkpointDatabase('FULL');
   const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..+/, '').replace('T', '-');
   const safeLabel = String(label).replace(/[^a-z0-9-]/gi, '-').toLowerCase();
   const backupFile = path.join(backupDir, `pm-tools-${stamp}-${safeLabel}.sqlite`);

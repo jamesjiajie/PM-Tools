@@ -449,6 +449,10 @@ h2 {
   flex: 1 1 280px;
 }
 
+.project-switcher {
+  flex: 0 1 260px;
+}
+
 .search-field span,
 .select-field span,
 .modal label > span,
@@ -478,6 +482,7 @@ input[type="number"],
 
 select {
   min-width: 148px;
+  max-width: 100%;
   padding: 0 10px;
 }
 

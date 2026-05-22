@@ -87,6 +87,12 @@
         </section>
 
         <section class="toolbar" aria-label="甘特图工具栏">
+          <label class="select-field project-switcher">
+            <span>当前项目</span>
+            <select :value="activeProjectId" @change="selectProject($event.target.value)">
+              <option v-for="project in projects" :key="project.id" :value="project.id">{{ project.name }}</option>
+            </select>
+          </label>
           <label class="search-field">
             <span>搜索</span>
             <input v-model="filters.keyword" type="search" placeholder="任务、负责人或阶段" />

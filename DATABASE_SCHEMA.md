@@ -102,7 +102,9 @@ Current V3 metadata keys:
 
 On startup, `server.js` runs `CREATE TABLE IF NOT EXISTS` for the core tables. This means normal startup will create missing tables but will not delete existing tables or rows.
 
-V3 records the schema version in `app_meta`. If the current database schema is older than the app schema version, the app first creates a consistent SQLite backup with `VACUUM INTO`, then applies the migration.
+V3 records the schema version in `app_meta`. If the current database schema is older than the app schema version, the app first checkpoints SQLite WAL pages, creates a consistent SQLite backup with `VACUUM INTO`, then applies the migration.
+
+Startup also runs a WAL checkpoint after initialization. This keeps recent committed changes reflected in `data/pm-tools.sqlite` itself, so copying or inspecting only the main database file is less likely to show an older snapshot.
 
 The V3 migration adds `tasks.parent_id` and `idx_tasks_parent_id` so each task can own one level of subtasks. The API validates that subtasks point to an existing top-level task in the same project.
 
