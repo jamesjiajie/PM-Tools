@@ -2,6 +2,15 @@ const { createApp } = Vue;
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 const STATUSES = ["未开始", "进行中", "已完成", "风险"];
+const CHINA_PUBLIC_HOLIDAY_RANGES = [
+  ["2026-01-01", "2026-01-03"],
+  ["2026-02-15", "2026-02-23"],
+  ["2026-04-04", "2026-04-06"],
+  ["2026-05-01", "2026-05-05"],
+  ["2026-06-19", "2026-06-21"],
+  ["2026-09-25", "2026-09-27"],
+  ["2026-10-01", "2026-10-07"],
+];
 const EMPTY_FORM = {
   name: "",
   owner: "",
@@ -17,11 +26,32 @@ const EMPTY_FORM = {
 
 function todayIso() {
   const date = new Date();
+  return toIsoDate(date);
+}
+
+function toIsoDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 }
+
+function createIsoRange(startIso, endIso) {
+  const dates = [];
+  const cursor = new Date(`${startIso}T00:00:00`);
+  const endDate = new Date(`${endIso}T00:00:00`);
+
+  while (cursor <= endDate) {
+    dates.push(toIsoDate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+const CHINA_PUBLIC_HOLIDAYS = new Set(
+  CHINA_PUBLIC_HOLIDAY_RANGES.flatMap(([startIso, endIso]) => createIsoRange(startIso, endIso)),
+);
 
 function createTaskForm(overrides = {}) {
   const today = todayIso();
@@ -48,7 +78,7 @@ createApp({
         status: "all",
         criticalOnly: false,
       },
-      hideWeekends: false,
+      hideHolidays: false,
       statuses: STATUSES,
       dayWidth: 52,
       today: new Date(`${todayIso()}T00:00:00`),
@@ -156,7 +186,7 @@ createApp({
           label: `${date.getMonth() + 1}/${date.getDate()}`,
           weekday: "日一二三四五六"[date.getDay()],
         };
-      }).filter((day) => !this.hideWeekends || !this.isWeekendIso(day.iso));
+      }).filter((day) => !this.hideHolidays || !this.isHolidayIso(day.iso));
     },
 
     timelineWidth() {
@@ -767,8 +797,20 @@ createApp({
       return this.isWeekendDate(new Date(`${dateString}T00:00:00`));
     },
 
+    isChinaPublicHolidayIso(dateString) {
+      return CHINA_PUBLIC_HOLIDAYS.has(dateString);
+    },
+
+    isHolidayDate(date) {
+      return this.isWeekendDate(date) || this.isChinaPublicHolidayIso(this.toIso(date));
+    },
+
+    isHolidayIso(dateString) {
+      return this.isWeekendIso(dateString) || this.isChinaPublicHolidayIso(dateString);
+    },
+
     isVisibleDate(date) {
-      return !this.hideWeekends || !this.isWeekendDate(date);
+      return !this.hideHolidays || !this.isHolidayDate(date);
     },
 
     visibleOffsetForDate(date) {
@@ -830,10 +872,7 @@ createApp({
     },
 
     toIso(date) {
-      const year = date.getFullYear();
-      const month = String(date.getMonth() + 1).padStart(2, "0");
-      const day = String(date.getDate()).padStart(2, "0");
-      return `${year}-${month}-${day}`;
+      return toIsoDate(date);
     },
   },
 }).mount("#app");
