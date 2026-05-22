@@ -48,6 +48,7 @@ createApp({
         status: "all",
         criticalOnly: false,
       },
+      hideWeekends: false,
       statuses: STATUSES,
       dayWidth: 52,
       today: new Date(`${todayIso()}T00:00:00`),
@@ -151,11 +152,11 @@ createApp({
         date.setDate(this.ganttStart.getDate() + index);
 
         return {
-          iso: date.toISOString().slice(0, 10),
+          iso: this.toIso(date),
           label: `${date.getMonth() + 1}/${date.getDate()}`,
           weekday: "日一二三四五六"[date.getDay()],
         };
-      });
+      }).filter((day) => !this.hideWeekends || !this.isWeekendIso(day.iso));
     },
 
     timelineWidth() {
@@ -169,11 +170,11 @@ createApp({
     },
 
     todayOffset() {
-      return this.daysBetween(this.ganttStart, this.today);
+      return this.visibleOffsetForDate(this.today);
     },
 
     showTodayLine() {
-      return this.todayOffset >= 0 && this.todayOffset < this.timelineDays.length && this.visibleTaskRows.length > 0;
+      return this.todayOffset !== null && this.todayOffset >= 0 && this.todayOffset < this.timelineDays.length && this.visibleTaskRows.length > 0;
     },
 
     dateRangeLabel() {
@@ -587,7 +588,7 @@ createApp({
       this.endDateDrag = {
         taskId: task.id,
         timelineRect: timeline.getBoundingClientRect(),
-        startOffset: this.daysBetween(this.ganttStart, startDate),
+        startOffset: this.visibleOffsetForDate(startDate),
         startX: event.clientX,
         moved: false,
       };
@@ -601,9 +602,8 @@ createApp({
 
       const { timelineRect, startOffset, startX, taskId } = this.endDateDrag;
       const targetOffset = Math.max(startOffset, Math.floor((event.clientX - timelineRect.left) / this.dayWidth));
-      const nextEndDate = new Date(this.ganttStart);
-      nextEndDate.setDate(this.ganttStart.getDate() + targetOffset);
-      const nextEnd = this.toIso(nextEndDate);
+      const nextEnd = this.visibleDateForOffset(targetOffset);
+      if (!nextEnd) return;
 
       if (Math.abs(event.clientX - startX) > 2) {
         this.endDateDrag.moved = true;
@@ -643,8 +643,8 @@ createApp({
       this.taskMoveDrag = {
         taskId: task.id,
         anchorStart,
-        startOffset: this.daysBetween(new Date(`${anchorStart}T00:00:00`), startDate),
-        duration: this.daysBetween(startDate, endDate),
+        startOffset: this.visibleOffsetForDate(startDate),
+        duration: this.visibleSpanDays(task.start, task.end) - 1,
         startX: event.clientX,
         startY: event.clientY,
         active: false,
@@ -665,25 +665,32 @@ createApp({
       if (!this.taskMoveDrag) return;
 
       const { active, anchorStart, duration, startOffset, startX, startY, taskId } = this.taskMoveDrag;
-      const distance = Math.hypot(event.clientX - startX, event.clientY - startY);
+      const deltaX = event.clientX - startX;
+      const deltaY = event.clientY - startY;
 
       if (!active) {
-        if (distance > 6) this.cancelTaskMoveDrag();
-        return;
+        if (Math.abs(deltaX) > 6 && Math.abs(deltaX) >= Math.abs(deltaY)) {
+          if (this.taskMoveDrag.timer) window.clearTimeout(this.taskMoveDrag.timer);
+          this.taskMoveDrag.active = true;
+          this.suppressBarClick = true;
+        } else if (Math.abs(deltaY) > 8) {
+          this.cancelTaskMoveDrag();
+          return;
+        } else {
+          return;
+        }
       }
 
-      const deltaDays = Math.round((event.clientX - startX) / this.dayWidth);
+      const deltaDays = Math.round(deltaX / this.dayWidth);
       const nextStartOffset = Math.max(0, startOffset + deltaDays);
-      const anchorDate = new Date(`${anchorStart}T00:00:00`);
-      const nextStart = new Date(anchorDate);
-      const nextEnd = new Date(anchorDate);
-      nextStart.setDate(anchorDate.getDate() + nextStartOffset);
-      nextEnd.setDate(anchorDate.getDate() + nextStartOffset + duration);
+      const nextStart = this.visibleDateForOffset(nextStartOffset);
+      const nextEnd = this.visibleDateForOffset(nextStartOffset + duration);
+      if (!nextStart || !nextEnd) return;
 
       if (Math.abs(deltaDays) > 0) this.taskMoveDrag.moved = true;
 
       this.tasks = this.tasks.map((task) =>
-        task.id === taskId ? { ...task, start: this.toIso(nextStart), end: this.toIso(nextEnd) } : task,
+        task.id === taskId ? { ...task, start: nextStart, end: nextEnd } : task,
       );
     },
 
@@ -715,8 +722,8 @@ createApp({
     },
 
     barStyle(task) {
-      const startOffset = this.daysBetween(this.ganttStart, new Date(`${task.start}T00:00:00`));
-      const duration = this.daysBetween(new Date(`${task.start}T00:00:00`), new Date(`${task.end}T00:00:00`)) + 1;
+      const startOffset = this.visibleOffsetForDate(new Date(`${task.start}T00:00:00`));
+      const duration = this.visibleSpanDays(task.start, task.end);
 
       return {
         left: `${startOffset * this.dayWidth + 8}px`,
@@ -725,8 +732,8 @@ createApp({
     },
 
     milestoneStyle(task) {
-      const startOffset = this.daysBetween(this.ganttStart, new Date(`${task.start}T00:00:00`));
-      const duration = this.daysBetween(new Date(`${task.start}T00:00:00`), new Date(`${task.end}T00:00:00`)) + 1;
+      const startOffset = this.visibleOffsetForDate(new Date(`${task.start}T00:00:00`));
+      const duration = this.visibleSpanDays(task.start, task.end);
       return {
         left: `${(startOffset + duration - 0.7) * this.dayWidth}px`,
       };
@@ -752,6 +759,63 @@ createApp({
       return Math.round((end - start) / MS_PER_DAY);
     },
 
+    isWeekendDate(date) {
+      return date.getDay() === 0 || date.getDay() === 6;
+    },
+
+    isWeekendIso(dateString) {
+      return this.isWeekendDate(new Date(`${dateString}T00:00:00`));
+    },
+
+    isVisibleDate(date) {
+      return !this.hideWeekends || !this.isWeekendDate(date);
+    },
+
+    visibleOffsetForDate(date) {
+      const target = new Date(date);
+      let offset = 0;
+      const cursor = new Date(this.ganttStart);
+
+      while (cursor <= this.ganttEnd) {
+        if (this.isVisibleDate(cursor)) {
+          if (cursor >= target) return offset;
+          offset += 1;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      return Math.max(0, offset - 1);
+    },
+
+    visibleDateForOffset(offset) {
+      let visibleIndex = 0;
+      const cursor = new Date(this.ganttStart);
+
+      while (visibleIndex <= offset) {
+        if (this.isVisibleDate(cursor)) {
+          if (visibleIndex === offset) return this.toIso(cursor);
+          visibleIndex += 1;
+        }
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      return null;
+    },
+
+    visibleSpanDays(startIso, endIso) {
+      const startDate = new Date(`${startIso}T00:00:00`);
+      const endDate = new Date(`${endIso}T00:00:00`);
+      let count = 0;
+      const cursor = new Date(startDate);
+
+      while (cursor <= endDate) {
+        if (this.isVisibleDate(cursor)) count += 1;
+        cursor.setDate(cursor.getDate() + 1);
+      }
+
+      return Math.max(count, 1);
+    },
+
     formatDate(dateString) {
       const date = new Date(`${dateString}T00:00:00`);
       return `${date.getMonth() + 1}/${date.getDate()}`;
@@ -766,7 +830,10 @@ createApp({
     },
 
     toIso(date) {
-      return date.toISOString().slice(0, 10);
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${year}-${month}-${day}`;
     },
   },
 }).mount("#app");
